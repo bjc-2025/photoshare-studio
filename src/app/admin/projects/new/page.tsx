@@ -14,7 +14,7 @@ export default function NewProjectPage() {
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const projectName = e.target.value;
     setName(projectName);
-    setSlug(slugify(projectName));
+    setSlug(slugify(projectName).trim());
   };
 
   const handleSubmit = async () => {
@@ -23,18 +23,23 @@ export default function NewProjectPage() {
       return;
     }
 
+    const currentSlug = slugify(name.trim()); // ensure it's set and clean
     setSaving(true);
     setError('');
 
     const { data, error } = await supabase.from('projects').insert([
-      { name, slug },
+      { name: name.trim(), slug: currentSlug },
     ]);
 
     if (error) {
-      setError(`Failed to create project: ${error.message}`);
+      if (error.code === '23505') {
+        setError('A project with this name or slug already exists. Please choose a different name.');
+      } else {
+        setError(`Failed to create project: ${error.message}`);
+      }
       setSaving(false);
     } else {
-      router.push(`/admin/projects/${slug}/upload`);
+      router.push(`/admin/projects/${currentSlug}/upload`);
     }
   };
 
