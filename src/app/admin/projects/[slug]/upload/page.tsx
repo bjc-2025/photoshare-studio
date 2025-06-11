@@ -1,13 +1,15 @@
 'use client';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
+import ProjectGallery from '@/components/ProjectGallery';
 
 export default function UploadPhotosPage() {
   const { slug } = useParams();
   const [files, setFiles] = useState<File[]>([]);
   const [uploaded, setUploaded] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState(''); // ✅ moved inside the component
+  const [error, setError] = useState('');
+  const [refreshCount, setRefreshCount] = useState(0);
 
   const handleSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || []);
@@ -16,34 +18,42 @@ export default function UploadPhotosPage() {
 
   const handleUpload = async () => {
     if (!files.length || !slug) return;
+
     setUploading(true);
     setError('');
     setUploaded([]);
 
-    const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
-    const preset = 'photoshare';
-console.log(`Uploading to: https://api.cloudinary.com/v1_1/damb7e1po/upload`);
     const uploadPromises = files.map(async (file) => {
-      try {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('upload_preset', preset);
-        formData.append('folder', `photoshare/${slug}`);
+      const timestamp = Math.floor(Date.now() / 1000);
+      const fileName = file.name.replace(/\s+/g, '_');
+      const publicId = `photoshare/${slug}/${fileName}`;
 
-        const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/upload`, {
-          method: 'POST',
-          body: formData,
-        });
+      // 🔐 Request signed upload parameters
+      const sigRes = await fetch('/api/cloudinary-signature', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public_id: publicId, timestamp }),
+      });
 
-        const data = await res.json();
+      const { signature, api_key, cloud_name } = await sigRes.json();
 
-        if (data.secure_url) {
-          return { fileName: file.name, url: data.secure_url };
-        } else {
-          throw new Error(data.error?.message || 'Upload failed');
-        }
-      } catch (err: any) {
-        return { fileName: file.name, error: err.message || 'Unknown error' };
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('public_id', publicId);
+      formData.append('timestamp', `${timestamp}`);
+      formData.append('api_key', api_key);
+      formData.append('signature', signature);
+
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${cloud_name}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (data.secure_url) {
+        return { fileName: file.name, url: data.secure_url };
+      } else {
+        throw new Error(data.error?.message || 'Upload failed');
       }
     });
 
@@ -59,6 +69,7 @@ console.log(`Uploading to: https://api.cloudinary.com/v1_1/damb7e1po/upload`);
         : ''
     );
     setUploading(false);
+    setRefreshCount(prev => prev + 1);
   };
 
   return (
@@ -76,7 +87,6 @@ console.log(`Uploading to: https://api.cloudinary.com/v1_1/damb7e1po/upload`);
         {uploading ? 'Uploading...' : 'Upload Photos'}
       </button>
 
-      {/* ✅ Upload status messages */}
       {error && (
         <div className="bg-red-100 text-red-700 p-3 mt-4 rounded whitespace-pre-wrap">
           {error}
@@ -89,7 +99,6 @@ console.log(`Uploading to: https://api.cloudinary.com/v1_1/damb7e1po/upload`);
         </div>
       )}
 
-      {/* ✅ Thumbnails */}
       <div className="grid grid-cols-2 gap-4 mt-6">
         {uploaded.map((url, idx) => (
           <img
@@ -100,6 +109,8 @@ console.log(`Uploading to: https://api.cloudinary.com/v1_1/damb7e1po/upload`);
           />
         ))}
       </div>
+
+      <ProjectGallery slug={slug as string} refreshTrigger={refreshCount} />
     </div>
   );
 }
